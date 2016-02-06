@@ -14,22 +14,31 @@
 args <- commandArgs(trailingOnly = TRUE)
 library(tools)
 
+print_usage = function(){
+    print(paste("Usage: Rscript mhci_rankboost.R <MHC_pred_file> <rsem_isoforms_file> ",
+              "<transgened_peptide_fasta> [<V,W,X,Y,Z>]", sep="", collapse=""))
+    print(paste("Where V,W,X,Y,Z = boost values for num_pepts_all, num_pepts_high, num_mhc, tpm, ",
+                "overlap  respectively. The values should be comma separated without any spaces.",
+                sep="", collapse=""))
+    quit("no", 1) 
+}
+
+if (length(args) == 3){
+        ratios=c(1, 1, 1, 1, 1)
+} else if (length(args) == 4){
+    ratios <- as.numeric(strsplit(args[4], ",")[[1]])
+    if (length(ratios) != 5 ) {
+        print("ERROR: Need to submit 5 values for ratio") 
+        print_usage()
+    }
+} else {
+    print_usage()
+}
+
 filename <- args[1] # input merged mhc predicitons file
 rsem_fn <- args[2] # input rsem call containing file for the sample
 fa_fn <- args[3] # input peptide file for the prediction
 
-if (length(args) == 3) 
-    {
-        ratios=c(1, 1, 1, 1, 1)
-} else 
-    {
-        ratios <- as.numeric(strsplit(args[4], ",")[[1]])
-        if (length(ratios) != 5 ) 
-               {
-                    print("ERROR: Need to submit 5 values for ratio") 
-                    quit("no", 1) 
-               }
-}
 max_boost <- 55  # This allows peptide #2 to overthrow peptide #1
 boost_npa <- max_boost * ( ratios[1]/sum(ratios) )
 boost_nph <- max_boost * ( ratios[2]/sum(ratios) )
