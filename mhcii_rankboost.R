@@ -24,9 +24,9 @@ if (length(args) == 3)
 } else 
     {
         ratios <- as.numeric(strsplit(args[4], ",")[[1]])
-        if (length(ratios) != 5 ) 
+        if (length(ratios) != 4 ) 
                {
-                    print("ERROR: Need to submit 5 values for ratio") 
+                    print("ERROR: Need to submit 4 values for ratio") 
                     quit("no", 1) 
                }
 }
