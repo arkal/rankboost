@@ -28,7 +28,7 @@ if (length(args) == 3){
 } else if (length(args) == 4){
     ratios <- as.numeric(strsplit(args[4], ",")[[1]])
     if (length(ratios) != 5 ) {
-        print("ERROR: Need to submit 5 values for ratio") 
+        print("ERROR: Need to submit 5 values for ratio.") 
         print_usage()
     }
 } else {
@@ -47,10 +47,16 @@ boost_TPM <- max_boost * ( ratios[4]/sum(ratios) )
 boost_ovlp <- max_boost * ( ratios[5]/sum(ratios) )
 
 # read in merged MHC file
-x <- read.table(filename, colClasses=c("character", "character", "character", "NULL", "NULL",
-                                       "numeric", "character", "character", "character"))
-colnames(x) <- c("allele", "MHC_peptide", "input_peptide", "pc_binder", "ensembl_gene", "HUGO_gene",
-                 "mutations")
+x <- read.table(filename,
+                colClasses=c("character", "character", "character", "NULL", "NULL", "numeric",
+                             "character", "character", "character"),
+                col.names=c("allele", "peptide_seq", "peptide_name", "NA", "NA", "binding_score",
+                            "ensembl_gene", "HUGO_gene", "mutations"))
+
+if (length(rownames(x)) == 0){
+    print('Input file was empty.')
+    quit("no", 0)
+}
 
 #read in peptide file
 fa_file<-read.table(fa_fn, header=F, colClasses=c("character"))
@@ -59,16 +65,16 @@ fa_file[, 1]<-gsub(">", "", fa_file[, 1])
 rsem <- read.table(rsem_fn, header=T, row.names=1)
 
 # Add a column to input data for length of input peptide
-x$peplen <- sapply(X=x$MHC_peptide, FUN=nchar)
+x$peplen <- sapply(X=x$peptide_seq, FUN=nchar)
 
 # Making a change here for easy printing later
-x <- x[, c("allele", "input_peptide", "MHC_peptide", "pc_binder", "peplen", "mutations",
+x <- x[, c("allele", "peptide_name", "peptide_seq", "binding_score", "peplen", "mutations",
            "ensembl_gene", "HUGO_gene")]
 
 #split by input IAR
-all_data <- split(x, x$input_peptide)
+all_data <- split(x, x$peptide_name)
 #get min PC for each IAR
-stats <- as.data.frame(sapply(all_data, function(x){min(x$pc_binder)}))
+stats <- as.data.frame(sapply(all_data, function(x){min(x$binding_score)}))
 colnames(stats)[1] <- "min_pc"
 #number of peptides within this IAR
 stats$"num_pept" <- sapply(all_data, function(x){length(x[, 1])})
@@ -118,14 +124,14 @@ stats$TPM <- get_rsem_val(stats, 5)
 
 stats<-stats[stats$TPM!=0&!is.na(stats$TPM),]
 if ( length(stats[,1]) ==0 ){
-  print("No mutations found in expressed genes")
-  quit("no", 1)
+  print("No mutations found in expressed genes.")
+  quit("no", 0)
 }
 medTPM <- median(rsem[rsem[, 5]!=0,5])
 stats <- stats[stats$TPM > (0.1 * medTPM), ] # this can change
 if ( length(stats[,1]) ==0 ){
-  print("No mutations found in expressed genes")
-  quit("no", 1)
+  print("No mutations found in expressed genes.")
+  quit("no", 0)
 }
 
 stats<-stats[order(stats$min_pc, - stats$num_pept/stats$num_MHC, -stats$TPM),]
@@ -141,13 +147,13 @@ if (length(stats[,1]) > 10){
   for (i in rownames(stats)[-1]){
     neoepitope <- rownames(stats[i,])
     # boost by num_pept_high
-    n <- sum(all_data[neoepitope][[1]][,"pc_binder"] <= (stats[i, 'min_pc'] + 0.3)) - 1 
+    n <- sum(all_data[neoepitope][[1]][,"binding_score"] <= (stats[i, 'min_pc'] + 0.3)) - 1 
     boost <- boost_nph * ( (n >= 1) * 0.4 + 
                             (n >= 2) * 0.3 + 
                             (n >= 3) * 0.2 + 
                             (n >= 4) * 0.1 )
     # boost by num_pept_all
-    n <- length(all_data[neoepitope][[1]][,"pc_binder"])-1 
+    n <- length(all_data[neoepitope][[1]][,"binding_score"])-1 
     boost <- boost_npa * ( (n >= 10) * 0.4 +  
                             (n >= 15) * 0.3 +  
                             (n >= 20) * 0.2 +  
@@ -214,7 +220,7 @@ for (neoepitope in rownames(stats))
   columns <- columns[!columns%in%c("HUGO_gene", "ensembl_gene")]
   write.table(paste(columns, sep="\t", collapse="\t"), row.names=F, col.names=F, quote=F, append=T,
               sep="\t", file=paste(file_prefix,"_detailed_results.tsv", sep="", collapse=""))
-  write.table(all_data[neoepitope][[1]][order(all_data[neoepitope][[1]][,"pc_binder"]),columns],
+  write.table(all_data[neoepitope][[1]][order(all_data[neoepitope][[1]][,"binding_score"]),columns],
               row.names=F, col.names=F, quote=F, append=T, sep="\t",
               file=paste(file_prefix, "_detailed_results.tsv", sep="", collapse=""))
   write.table(file=paste(file_prefix, "_detailed_results.tsv", sep="", collapse=""), x="\n",
