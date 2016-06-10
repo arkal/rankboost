@@ -52,6 +52,14 @@ x <- read.table(filename,
                 col.names=c("allele", "peptide_seq", "peptide_name", "NA", "NA", "binding_score",
                             "ensembl_gene", "HUGO_gene", "mutations"))
 
+file_prefix <- gsub(paste(".", file_ext(filename), sep="", collapse=""), "", filename)
+write.table(paste("gene", "mutation", "containing_peptide", "corrected_rank", "original_rank",
+                  "num_binding_MHC", "filter_passing_peptides", "min_percentile_binder", "TPM",
+                  "binding_MHCS" , sep="\t", collapse="\t"),
+            file=paste(file_prefix, "_concise_results.tsv", sep="", collapse=""),
+            col.names=F, row.names=F, quote=F)
+file.create(paste(file_prefix, "_detailed_results.tsv", sep="", collapse=""))
+
 if (length(rownames(x)) == 0){
     print('Input file was empty.')
     quit("no", 0)
@@ -177,13 +185,6 @@ if (length(stats[,1]) > 10) {
 stats$"binding_MHCs" <- sapply(rownames(stats), function(x){
   paste(unique(unlist(sapply(all_data[x], "[[",1))),sep=",", collapse=",")
 })
-
-file_prefix <- gsub(paste(".", file_ext(filename), sep="", collapse=""), "", filename)
-write.table(paste("gene", "mutation", "containing_peptide", "corrected_rank", "original_rank",
-                  "num_binding_MHC", "filter_passing_peptides", "min_percentile_binder", "TPM",
-                  "binding_MHCS" , sep="\t", collapse="\t"),
-            file=paste(file_prefix, "_concise_results.tsv", sep="", collapse=""),
-            col.names=F, row.names=F, quote=F)
 
 write.table(file=paste(file_prefix, "_concise_results.tsv", sep="", collapse=""),
             stats[,c("gene", "mutation", "peptide", "mod_rank", "old_rank", "num_MHC", "num_pept",

@@ -46,6 +46,15 @@ boost_nMHC <- max_boost * ( ratios[3]/sum(ratios) )
 boost_TPM <- max_boost * ( ratios[4]/sum(ratios) ) 
 boost_ovlp <- max_boost * ( ratios[5]/sum(ratios) )
 
+# creating these now so they persist in a fail case
+file_prefix <- gsub(paste(".", file_ext(filename), sep="", collapse=""), "", filename)
+write.table(paste("gene", "mutation", "containing_peptide", "corrected_rank", "original_rank",
+                  "num_binding_MHC", "filter_passing_peptides", "overlap", "min_percentile_binder",
+                  "TPM", "binding_MHCS" , sep="\t", collapse="\t"),
+            file=paste(file_prefix, "_concise_results.tsv", sep="", collapse=""),
+            col.names=F, row.names=F, quote=F)
+file.create(paste(file_prefix, "_detailed_results.tsv", sep="", collapse=""))
+
 # read in merged MHC file
 x <- read.table(filename,
                 colClasses=c("character", "character", "character", "NULL", "NULL", "numeric",
@@ -197,13 +206,6 @@ if (length(stats[,1]) > 10){
 stats$"binding_MHCs" <- sapply(rownames(stats), function(x){
   paste(unique(unlist(sapply(all_data[x], "[[",1))),sep=",", collapse=",")
 })
-
-file_prefix <- gsub(paste(".", file_ext(filename), sep="", collapse=""), "", filename)
-write.table(paste("gene", "mutation", "containing_peptide", "corrected_rank", "original_rank",
-                  "num_binding_MHC", "filter_passing_peptides", "overlap", "min_percentile_binder",
-                  "TPM", "binding_MHCS" , sep="\t", collapse="\t"),
-            file=paste(file_prefix, "_concise_results.tsv", sep="", collapse=""),
-            col.names=F, row.names=F, quote=F)
 
 write.table(file=paste(file_prefix, "_concise_results.tsv", sep="", collapse=""),
             stats[,c("gene", "mutation", "peptide", "mod_rank", "old_rank", "num_MHC", "num_pept",
