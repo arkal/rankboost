@@ -15,26 +15,23 @@
 
 from __future__ import print_function
 
-import json
 from collections import namedtuple
 
 import argparse
 import logging
-
 import math
-
-import time
-
 import os
 import pandas
 import re
+import time
+import yaml
 
 _log = logging.getLogger(__name__)
 
 # Set this such that printing of alleles is not truncated
 pandas.options.display.max_colwidth = 300
 
-# A named tuple used during the boosting process.  It contains all the necessary values for boosting.
+# A named tuple used during the boosting process. It contains all the necessary values for boosting.
 Boost = namedtuple('Boost', (
     # The number of peptides defining the IAR.
     'npa',
@@ -53,9 +50,10 @@ Boost = namedtuple('Boost', (
     # The number of tumor score >= wt score + delta events
     'tndelta'
     ))
-# Update this everytime a new argument is added to boost
+# Update this every time a new argument is added to boost
 base_boost = {'npa': 0, 'nph': 0, 'nMHC': 0, 'med_max_MHC': 0, 'TPM': 0, 'medianTPM': 0,
               'overlap': 0, 'tndelta': 0}
+
 
 def read_fasta(pepfile):
     """
@@ -79,6 +77,8 @@ def read_fasta(pepfile):
 
 
 class EmptyInputException(Exception):
+    __module__ = Exception.__module__
+
     def __init__(self, filetype, filename):
         self.filetype = filetype
         message = 'Input %s file (%s) was empty.' % (filetype, filename)
@@ -86,6 +86,8 @@ class EmptyInputException(Exception):
 
 
 class NoExpressedActionableGenesException(Exception):
+    __module__ = Exception.__module__
+
     def __init__(self, filtering, filter_level=None):
         if filtering:
             message = ('After filtering for only transcripts expressed at %s%% or more than the '
@@ -94,10 +96,10 @@ class NoExpressedActionableGenesException(Exception):
         else:
             message = ('There were no expressed genes found in the input peptides file before any '
                        'filters were applied. ')
-        message += ('You can lower the threshold on the command line using'
-                    '--expression_filter_threshold / -e and  try again. ''This lack of genes could '
-                    'either mean there truly are no expressed actionable genes in the patients '
-                    'tumor, or that the RNA-seq quality was poor.')
+        message += ('You can lower the threshold on the command line using '
+                    '--expression_filter_threshold (or -e) and  try again. ''This lack of genes '
+                    'could either mean there truly are no expressed actionable genes in the '
+                    'patient\'s tumor, or that the RNA-seq quality was poor.')
         super(NoExpressedActionableGenesException, self).__init__(message)
 
 
@@ -229,12 +231,12 @@ def get_minimal_iar_seq(iar_name, peptides, iars):
     Get the minimal IAR sequence for the peptides from the input IAR from the input IARs file
 
     :param str iar_name: The name of the iar
-    :param pandas.core.frame.DataFrame peptides: The mutations covered by the input IAR
+    :param pandas.core.series.Series peptides: The mutations covered by the input IAR
     :param dict iars: The input IARs
     :return: The sequence of the IAR
     :rtype: str
 
-    >>> df = pandas.DataFrame({'peptide_seq': ['ABCD', 'ABCE', 'CDEA']})
+    >>> df = pandas.Series(['ABCD', 'ABCE', 'CDEA'])
     >>> get_minimal_iar_seq('seq1', df, {'seq1': 'DABCDEABCEEEE'})
     'ABCDEABCE'
     >>> get_minimal_iar_seq('seq1', df, {'seq1': 'DABCDEABCE'})
@@ -245,16 +247,16 @@ def get_minimal_iar_seq(iar_name, peptides, iars):
     iar = iars[iar_name]
     first = len(iar)
     last = 0
-    last_pep = ''
-    for pept in peptides['peptide_seq']:
+    end = 0
+    for pept in peptides:
         pos = iar.find(pept)
         if pos < first:
             first = pos
         if pos >= last:
             last = pos
-            last_pep = pept if len(pept) > len(last_pep) else last_pep
-    last += len(last_pep)
-    return iar[first:last]
+            peplen = len(pept)
+            end = pos + peplen if pos + peplen > end else end
+    return iar[first:end]
 
 
 def get_normal_comparisons(group_vals, delta=1.5):
@@ -285,7 +287,6 @@ def get_normal_comparisons(group_vals, delta=1.5):
     return result
 
 
-
 def prepare_dataframe(mhc, predfile, expfile, pepfile, efilt_threshold, boost):
     """
     Prepares an input dataframe for rank_boost using the data in in `predfile` , `expfile` and
@@ -305,7 +306,10 @@ def prepare_dataframe(mhc, predfile, expfile, pepfile, efilt_threshold, boost):
     if len(peptides) == 0:
         raise EmptyInputException('peptides', pepfile)
     _log.info('Reading in the merged MHC:peptide binding predictions from "%s".', predfile)
-    preds = pandas.read_table(predfile, nrows=1)
+    try:
+        preds = pandas.read_table(predfile, nrows=1)
+    except pandas.io.common.EmptyDataError:
+        raise EmptyInputException('predictions', predfile)
     if len(preds.columns) == 9:
         names = ['allele', 'peptide_seq', 'peptide_name', 'peptide_core', 'IC_50', 'binding_score',
                  'ENSEMBL_gene', 'HUGO_gene', 'mutations']
@@ -315,11 +319,10 @@ def prepare_dataframe(mhc, predfile, expfile, pepfile, efilt_threshold, boost):
                  'normal_binding_score', 'ENSEMBL_gene', 'HUGO_gene', 'mutations']
         normals = True
     preds = pandas.read_table(predfile, names=names)
-    if len(preds) == 0:
-        raise EmptyInputException('predictions', predfile)
     _log.info('Reading in the expression data from "%s".', expfile)
-    expn = pandas.read_table(expfile)
-    if len(expn) == 0:
+    try:
+        expn = pandas.read_table(expfile)
+    except pandas.io.common.EmptyDataError:
         raise EmptyInputException('expression', expfile)
     # Add a column to preds for the length of the peptide
     preds['peplen'] = [len(seq) for seq in preds['peptide_seq']]
@@ -350,7 +353,7 @@ def prepare_dataframe(mhc, predfile, expfile, pepfile, efilt_threshold, boost):
         stats['overlap'] = overlap_array
     else:
         stats['overlap'] = [0] * len(stats)
-    if normfile:
+    if normals:
         tn_array = []
         for group_name, group_vals in all_data['binding_score', 'normal_binding_score']:
             tn_array.append(get_normal_comparisons(group_vals))
@@ -385,8 +388,8 @@ def prepare_dataframe(mhc, predfile, expfile, pepfile, efilt_threshold, boost):
     median_mhc = int(stats['num_MHC'].median())
     max_mhc = stats['num_MHC'].max()
     tmp_boost = Boost(npa=0, nph=0, nMHC=0, med_max_MHC=(median_mhc, max_mhc), TPM=0,
-                      medianTPM=median_expressed_transcript_tpm, overlap=0)
-    boost = Boost(*[sum(x) if type(x[0]) != tuple else x[1] for x in zip(boost, tmp_boost)])
+                      medianTPM=median_expressed_transcript_tpm, overlap=0, tndelta=0)
+    boost = Boost(*[sum(x) if type(x[1]) != tuple else x[1] for x in zip(boost, tmp_boost)])
     _log.info('Finished creating the data frame for rank boosting..')
     return all_data, stats, boost
 
@@ -587,7 +590,7 @@ def boost_ranks(mhc, all_data, dataframe, boost):
         dataframe.index.name = 'index'
     # temp_rank has no more use
     dataframe.pop('temp_rank')
-    _log.info('Succcessfully boosted ranks in the input data.')
+    _log.info('Successfully boosted ranks in the input data.')
     return dataframe
 
 
@@ -623,9 +626,12 @@ def write_results(mhc, all_data=None, boosted_ranks=None):
                 epitope_data = all_data.get_group(row.epitope_name)
                 epitope_data = epitope_data.sort_values(by=['binding_score', 'peplen'],
                                                         ascending=[1, 0])
+                if 'normal_binding_score' not in epitope_data:
+                    epitope_data.normal_binding_score = 'NA'
                 print(epitope_data.to_string(index=False, header=True,
                                              columns=['allele', 'peptide_seq', 'binding_score',
-                                                      'peplen', 'mutations']), file=f)
+                                                      'normal_binding_score', 'peplen', 'mutations'
+                                                      ]), file=f)
                 print('', file=f)
     # Always print a concise file.  Even if there are no results because the input was empty.
     boosted_ranks.to_csv(concise_file_name, sep='\t', header=True, columns=columns, index=False)
@@ -648,20 +654,20 @@ def main():
                         action='store_true')
     parser.add_argument('--predictions', '-P', dest='prediction_file', help='The input predictions '
                         'file that is created by parsing the results of running the IEDB '
-                        'MHC-prediction suite on all alleles in the patient. The input format is'
+                        'MHC-prediction suite on all alleles in the patient. The input format is '
                         '"allele", "peptide_seq", "peptide_name", "core", "ic50", "binding_score", '
                         '["normal_binding_score"], "ensembl_gene", "HUGO_gene", "mutations" -- '
                         'where the square brackets describe and optional field.',
                         type=str,
                         required=True)
     parser.add_argument('--expression', '-E', dest='expression_file', help='The isoform-level '
-                        'expression obtained through RSEM (or in the same format as RSEM',
+                        'expression obtained through RSEM (or in the same format as RSEM).',
                         required=True)
     parser.add_argument('--peptides', '-F', dest='peptide_file', help='The 10- or 15-mer peptides '
-                        'file generated using Transgene (9- and 10-mer predictions use the 10-mer'
+                        'file generated using Transgene (9- and 10-mer predictions use the 10-mer '
                         'fasta and the 15-mer uses the 15-mer fasta.')
     parser.add_argument('--expression_filter_threshold', '-f', dest='efilt_threshold',
-                        help='The percentage of expressed below which we must remove candidate'
+                        help='The percentage of expressed below which we must remove candidate '
                              'genes.', type=float, default=10, required=False)
     parser.add_argument('--ratios', '-r', dest='ratios', help='The relative ratios for the '
                         'different ranking criteria to use during boosting.  The values will be '
@@ -688,15 +694,17 @@ def main():
     assert params.efilt_threshold < 100.0
     params.efilt_threshold = round(params.efilt_threshold/100.0, 2)
     try:
-        params.ratios = json.loads(params.ratios)
-    except:
-        _log.exception('Is your ratios argument properly json-formatted?')
-    assert not(set(params.ratios.keys()) - set(params.bas_boost.keys()))
+        params.ratios = yaml.load(params.ratios)
+    except ValueError:
+        _log.error('Is your ratios argument properly json-formatted?')
+        raise
+    assert not(set(params.ratios.keys()) - set(base_boost.keys()))
     base_boost.update(params.ratios)
     params.ratios = base_boost
-    for x, y in params.ratios:
+    for x, y in params.ratios.iteritems():
         assert isinstance(y, (float, int)), 'problem parsing %s:%s in ratios' % (x, y)
     sum_of_ratios = sum(params.ratios.values())
+    assert sum_of_ratios != 0.0, 'Cannot boost without ratios.'
     for i, v in params.ratios.items():
         v = round(0.55 * v / sum_of_ratios, 2)
         params.ratios[i] = v
@@ -711,12 +719,13 @@ def main():
                                                        params.efilt_threshold,
                                                        boost)
     except EmptyInputException as e:
+        _log.warning(e.message)
         if e.filetype == 'predictions':
-            _log.exception()
+            _log.warning('No input binding predictions received for boosting.')
         else:
             raise
-    except NoExpressedActionableGenesException:
-        _log.exception()
+    except NoExpressedActionableGenesException as e:
+        _log.warning(e.message)
     else:
         boosted_ranks = boost_ranks(mhc,
                                     all_data,
