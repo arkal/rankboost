@@ -608,7 +608,7 @@ def write_results(mhc, all_data=None, boosted_ranks=None):
     columns = ['HUGO_gene', 'mutations', 'epitope_name', 'IAR_sequence', 'binding_score',
                'num_pept', 'num_MHC']
     columns.extend(['overlap'] if mhc == 'mhci' else [])
-    columns.extend(['TPM', 'naive_rank', 'boosted_rank', 'binding_MHCs'])
+    columns.extend(['T/N', 'TPM', 'naive_rank', 'boosted_rank', 'binding_MHCs'])
 
     concise_file_name = os.path.join(os.getcwd(), ''.join([mhc, '_rankboost_concise_results.tsv']))
     detailed_file_name = os.path.join(os.getcwd(), ''.join([mhc,
