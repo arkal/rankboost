@@ -92,7 +92,7 @@ class NoExpressedActionableGenesException(Exception):
         if filtering:
             message = ('After filtering for only transcripts expressed at %s%% or more than the '
                        'expressed transcripts in the patient, we could find actionable genes.' %
-                       filter_level * 100.0)
+                       (filter_level * 100.0))
         else:
             message = ('There were no expressed genes found in the input peptides file before any '
                        'filters were applied. ')
