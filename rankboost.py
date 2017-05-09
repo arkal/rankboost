@@ -88,7 +88,7 @@ class EmptyInputException(Exception):
 class NoExpressedActionableGenesException(Exception):
     __module__ = Exception.__module__
 
-    def __init__(self, filtering, filter_level=None):
+    def __init__(self, filtering, filter_level=None, fusions=None):
         if filtering:
             message = ('After filtering for only transcripts expressed at %s%% or more than the '
                        'expressed transcripts in the patient, we could find actionable genes.' %
@@ -96,6 +96,9 @@ class NoExpressedActionableGenesException(Exception):
         else:
             message = ('There were no expressed genes found in the input peptides file before any '
                        'filters were applied. ')
+        if fusions:
+            message += (' Also, a fusion gene should have been expressed since we caught it in '
+                        'the RNA.')
         message += ('You can lower the threshold on the command line using '
                     '--expression_filter_threshold (or -e) and  try again. ''This lack of genes '
                     'could either mean there truly are no expressed actionable genes in the '
@@ -149,8 +152,14 @@ def get_overlap(df):
 
 def get_mutations(mutations):
     """
-    Given the list of mutations in the form <TRANSCRIPT_1>_X123Y,<TRANSCRIPT_2>_X456Y,etc. return it
-    in the form X>Y
+    Given the list of mutations in the form
+        <TRANSCRIPT_1>_X123Y,<TRANSCRIPT_2>_X456Y,etc  -> for SNVS
+
+        <5'TRANSCRIPT_1>-<3'TRANSCRIPT_1>_FUSION_Junction:X-Spanning:Y,\
+        <5'TRANSCRIPT_2>-<3'TRANSCRIPT_2>_FUSION_Junction:A-Spanning:B,etc  -> for FUSIONS
+
+    return it
+    in the form X>Y or FUSION
 
     :param pandas.Series mutations: The mutations covered by the input IAR
     :return: The mutations in the reduced form
@@ -166,6 +175,8 @@ def get_mutations(mutations):
     'S>K+X+K>S'
     >>> get_mutations(pandas.Series(['ENST1231.1_S123K_K126S,ENST1211.1_S143K_K146S']))
     'S>K+2X+K>S'
+    >>> get_mutations(pandas.Series(['ENST1231.1-ENST4564.2_FUSION_Junction:5-Spanning:10']))
+    'FUSION'
     >>> get_mutations(pandas.Series(['ENST1231.1_S123K_K125S,ENST1211.1_S143K_K147S']))
     Traceback (most recent call last):
     ...
@@ -175,6 +186,8 @@ def get_mutations(mutations):
     muts = mutations[mutations.first_valid_index()].split(',')
     out_muts = []
     for mutation in muts:
+        if 'FUSION' in mutation:
+            return 'FUSION'
         mutation = mutation.split('_')[1:]
         temp_mutation = []
         prev_pos = 0
@@ -195,8 +208,12 @@ def get_mutations(mutations):
 
 def get_expression(exp_type, rsem_table, transcripts):
     """
-    Given the list of mutations in the form <TRANSCRIPT_1>_X123Y,<TRANSCRIPT_2>_X456Y,etc. return
-    the combined expression in TPM or FPKM
+    Given the list of mutations in the form
+       <TRANSCRIPT_1>_X123Y,<TRANSCRIPT_2>_X456Y,etc.    -> for SNVs
+        <5'TRANSCRIPT_1>-<3'TRANSCRIPT_1>_FUSION_Junction:X-Spanning:Y,\
+        <5'TRANSCRIPT_2>-<3'TRANSCRIPT_2>_FUSION_Junction:A-Spanning:B,etc  -> for FUSIONS
+
+    return the combined expression in TPM or FPKM
 
     :param str exp_type: return TPM or FPKM?
     :param pandas.core.frame.DataFrame rsem_table: The isoform level expression table from rsem
@@ -209,13 +226,20 @@ def get_expression(exp_type, rsem_table, transcripts):
     1.0
     >>> get_expression('FPKM', rsem_table, pandas.Series(['A_S123K,B_S123K']))
     9.0
+    >>> get_expression('TPM', rsem_table, pandas.Series(['A-B_FUSION_Junction:1:spanning=2']))
+    1.0
     >>> get_expression('FPKM', rsem_table, pandas.Series(['D_S123K']))
     0.0
 
     """
     assert exp_type in ('TPM', 'FPKM')
     transcripts = transcripts[transcripts.first_valid_index()].split(',')
-    transcripts = [x.split('_')[0] for x in transcripts]
+    if 'FUSION' in transcripts[0]:
+        # TODO Implement a better estimate for expression of the fusion product
+        splitter = '-'
+    else:
+        splitter = '_'
+    transcripts = [x.split(splitter)[0] for x in transcripts]
     expression = 0.0
     for transcript in transcripts:
         expn_table = rsem_table[rsem_table['transcript_id'] == transcript][exp_type]
@@ -243,6 +267,9 @@ def get_minimal_iar_seq(iar_name, peptides, iars):
     'ABCDEABCE'
     >>> get_minimal_iar_seq('seq1', df, {'seq1': 'ABCDEABCE'})
     'ABCDEABCE'
+    >>> df = pandas.Series(['ABCD', 'ABCDE'])
+    >>> get_minimal_iar_seq('seq1', df, {'seq1': 'ABCDEABCE'})
+    'ABCDE'
     """
     iar = iars[iar_name]
     first = len(iar)
@@ -268,7 +295,8 @@ def get_normal_comparisons(group_vals, delta=1.5):
     :param float delta: The difference between tumor and wt that is considered as significant
     :return: The number of tum > normal events satisfying the given delta
 
-    >>> df = pandas.DataFrame({'binding_score': [2,3.5,5], 'normal_binding_score': [1,2,3]})
+    >>> df = pandas.DataFrame({'binding_score': [2,3.5,5,10], \
+                               'normal_binding_score': [1,2,3,pandas.np.nan]})
     >>> get_normal_comparisons(df, 1)
     3
     >>> get_normal_comparisons(df)
@@ -315,8 +343,16 @@ def prepare_dataframe(mhc, predfile, expfile, pepfile, efilt_threshold, boost):
                  'ENSEMBL_gene', 'HUGO_gene', 'mutations']
         normals = False
     else:
-        names = ['allele', 'peptide_seq', 'peptide_name', 'peptide_core', 'IC_50', 'binding_score',
-                 'normal_binding_score', 'ENSEMBL_gene', 'HUGO_gene', 'mutations']
+        if len(preds.columns) == 11:
+            names = ['allele', 'peptide_seq', 'normal_seq', 'peptide_name', 'peptide_core', 'IC_50',
+                     'binding_score', 'normal_binding_score', 'ENSEMBL_gene', 'HUGO_gene',
+                     'mutations']
+        elif len(preds.columns) == 10:
+            names = ['allele', 'peptide_seq', 'peptide_name', 'peptide_core', 'IC_50',
+                     'binding_score', 'normal_binding_score', 'ENSEMBL_gene', 'HUGO_gene',
+                     'mutations']
+        else:
+            raise RuntimeError('The input predictions file is formatted badly.')
         normals = True
     preds = pandas.read_table(predfile, names=names)
     _log.info('Reading in the expression data from "%s".', expfile)
@@ -372,14 +408,21 @@ def prepare_dataframe(mhc, predfile, expfile, pepfile, efilt_threshold, boost):
     # stats['FPKM'] = all_data.aggregate({'mutations':
     #                                        lambda x: get_expression('FPKM', expn, x)})
     if stats[stats['TPM'] > 0.0].empty:
-        raise NoExpressedActionableGenesException(filtering=False)
+        raise NoExpressedActionableGenesException(filtering=False,
+                                                  fusions=not stats[stats.mutations == 'FUSION'
+                                                                    ].empty)
     median_expressed_transcript_tpm = expn[expn['TPM'] > 0.0]['TPM'].median()
     # Keep only the transcripts expressed at higher than 10% of the median expressed-transcript
     # expression.
     # TODO: This needs to be tweaked
-    stats = stats[stats['TPM'] > efilt_threshold * median_expressed_transcript_tpm]
+    temp_stats = stats[(stats.mutations != 'FUSION') &
+                      (stats.TPM > efilt_threshold * median_expressed_transcript_tpm)]
+    # Fusions will never be filtered
+    stats = temp_stats.append(stats[stats.mutations == 'FUSION'])
     if stats[stats['TPM'] > 0.0].empty:
-        raise NoExpressedActionableGenesException(filtering=True, filter_level=efilt_threshold)
+        raise NoExpressedActionableGenesException(filtering=True, filter_level=efilt_threshold,
+                                                  fusions=not stats[stats.mutations == 'FUSION'
+                                                                    ].empty)
 
     # Order the final dataframe before returning it
     stats['pept/mhc'] = [round(x, 2) for x in stats['num_pept']/stats['num_MHC']]
