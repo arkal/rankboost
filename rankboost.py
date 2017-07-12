@@ -161,29 +161,30 @@ def get_mutations(mutations):
     return it
     in the form X>Y or FUSION
 
-    :param pandas.Series mutations: The mutations covered by the input IAR
+    :param str mutations: The mutations covered by the input IAR
     :return: The mutations in the reduced form
     :rtype: str
 
-    >>> get_mutations(pandas.Series(['ENST1231.1_S123K']))
+    >>> get_mutations('ENST1231.1_S123K')
     'S>K'
-    >>> get_mutations(pandas.Series(['ENST1231.1_S123K,ENST1211.1_S143K']))
+    >>> get_mutations('ENST1231.1_S123K,ENST1211.1_S143K')
     'S>K'
-    >>> get_mutations(pandas.Series(['ENST1231.1_S123K_K124S,ENST1211.1_S143K_K144S']))
+    >>> get_mutations('ENST1231.1_S123K_K124S,ENST1211.1_S143K_K144S')
     'S>K+K>S'
-    >>> get_mutations(pandas.Series(['ENST1231.1_S123K_K125S,ENST1211.1_S143K_K145S']))
+    >>> get_mutations('ENST1231.1_S123K_K125S,ENST1211.1_S143K_K145S')
     'S>K+X+K>S'
-    >>> get_mutations(pandas.Series(['ENST1231.1_S123K_K126S,ENST1211.1_S143K_K146S']))
+    >>> get_mutations('ENST1231.1_S123K_K126S,ENST1211.1_S143K_K146S')
     'S>K+2X+K>S'
-    >>> get_mutations(pandas.Series(['ENST1231.1-ENST4564.2_FUSION_Junction:5-Spanning:10']))
+    >>> get_mutations('ENST1231.1-ENST4564.2_FUSION_Junction:5-Spanning:10')
     'FUSION'
-    >>> get_mutations(pandas.Series(['ENST1231.1_S123K_K125S,ENST1211.1_S143K_K147S']))
+    >>> get_mutations('ENST1231.1_S123K_K125S,ENST1211.1_S143K_K147S')
     Traceback (most recent call last):
     ...
     AssertionError
 
     """
-    muts = mutations[mutations.first_valid_index()].split(',')
+    #muts = mutations[mutations.first_valid_index()].split(',')
+    muts = mutations.split(',')
     out_muts = []
     for mutation in muts:
         if 'FUSION' in mutation:
@@ -217,23 +218,23 @@ def get_expression(exp_type, rsem_table, transcripts):
 
     :param str exp_type: return TPM or FPKM?
     :param pandas.core.frame.DataFrame rsem_table: The isoform level expression table from rsem
-    :param pandas.Series transcripts: The mutations covered by the input IAR
+    :param str transcripts: The mutations covered by the input IAR
     :return: The expression in TPM or FPKM
     :rtype: float
 
     >>> rsem_table=pandas.DataFrame({'transcript_id': ['A', 'B'], 'TPM': [1, 2], 'FPKM': [4, 5]})
-    >>> get_expression('TPM', rsem_table, pandas.Series(['A_S123K']))
+    >>> get_expression('TPM', rsem_table, 'A_S123K')
     1.0
-    >>> get_expression('FPKM', rsem_table, pandas.Series(['A_S123K,B_S123K']))
+    >>> get_expression('FPKM', rsem_table, 'A_S123K,B_S123K')
     9.0
-    >>> get_expression('TPM', rsem_table, pandas.Series(['A-B_FUSION_Junction:1:spanning=2']))
+    >>> get_expression('TPM', rsem_table, 'A-B_FUSION_Junction:1:spanning=2')
     1.0
-    >>> get_expression('FPKM', rsem_table, pandas.Series(['D_S123K']))
+    >>> get_expression('FPKM', rsem_table, 'D_S123K')
     0.0
 
     """
     assert exp_type in ('TPM', 'FPKM')
-    transcripts = transcripts[transcripts.first_valid_index()].split(',')
+    transcripts = transcripts.split(',')
     if 'FUSION' in transcripts[0]:
         # TODO Implement a better estimate for expression of the fusion product
         splitter = '-'
@@ -397,16 +398,22 @@ def prepare_dataframe(mhc, predfile, expfile, pepfile, efilt_threshold, boost):
     else:
         stats['T/N'] = [0] * len(stats)
     # Add reduced mutation information for the IAR
-    stats['mutations'] = all_data.aggregate({'mutations': get_mutations})
+    #stats['mutations'] = all_data.aggregate({'mutations': get_mutations})
     # Add the sequence of the IAR
     iars = []
     for pep_name, pep_seq in all_data['peptide_seq']:
         iars.append(get_minimal_iar_seq(pep_name, pep_seq, peptides))
     stats['IAR_sequence'] = iars
+    # Add mutation information for the IAR
+    stats['mutations'] = all_data.aggregate({'mutations': lambda m: m[m.first_valid_index()]})
+    # Collapse duplicates
+    stats = collapse_iars(stats)
     # Add expression info
-    stats['TPM'] = all_data.aggregate({'mutations': lambda m: get_expression('TPM', expn, m)})
+    stats['TPM'] = stats['mutations'].apply(lambda m: get_expression('TPM', expn, m))
     # stats['FPKM'] = all_data.aggregate({'mutations':
     #                                        lambda x: get_expression('FPKM', expn, x)})
+    # Add reduced mutation information for the IAR
+    stats['mutations'] = stats['mutations'].apply(get_mutations)
     if stats[stats['TPM'] > 0.0].empty:
         raise NoExpressedActionableGenesException(filtering=False,
                                                   fusions=not stats[stats.mutations == 'FUSION'
@@ -423,7 +430,6 @@ def prepare_dataframe(mhc, predfile, expfile, pepfile, efilt_threshold, boost):
         raise NoExpressedActionableGenesException(filtering=True, filter_level=efilt_threshold,
                                                   fusions=not stats[stats.mutations == 'FUSION'
                                                                     ].empty)
-
     # Order the final dataframe before returning it
     stats['pept/mhc'] = [round(x, 2) for x in stats['num_pept']/stats['num_MHC']]
     stats = stats.sort_values(by=['binding_score', 'pept/mhc', 'TPM'], ascending=[1, 0, 0])
@@ -435,6 +441,82 @@ def prepare_dataframe(mhc, predfile, expfile, pepfile, efilt_threshold, boost):
     boost = Boost(*[sum(x) if type(x[1]) != tuple else x[1] for x in zip(boost, tmp_boost)])
     _log.info('Finished creating the data frame for rank boosting..')
     return all_data, stats, boost
+
+
+def collapse_iars(stats):
+    """
+    Collapse duplicated IARs.
+
+    :param pandas.core.frame.DataFrame stats: The stats dataframe generated from parsing the input
+           calls
+    :return: A collapsed dataframe where overlapping IARS are merged into a single call
+    :rtype: pandas.core.frame.DataFrame
+
+    >>> df = pandas.DataFrame({'IAR_sequence': ['ABCDE', 'FGHI',\
+                                                'ABCD',         '12345', \
+                                                'ABCDE', 'FGHIJ',\
+                                                'ABC',                  '7891011'], \
+                                'mutations': ['A,B', 'G', 'A', '1', 'A,C', 'G,H', 'A,D', '8']}, \
+                                 index=['ne1', 'ne2', 'ne3', 'ne4', 'ne5', 'ne6', 'ne7', 'ne8'])
+    >>> tst = collapse_iars(df)
+    >>> tst.index
+    Index([u'ne1', u'ne2', u'ne4', u'ne8'], dtype='object')
+    >>> tst.loc['ne1', 'mutations']
+    'A,B,C,D'
+    >>> tst.loc['ne2', 'mutations']
+    'G,H'
+    >>> tst.loc['ne4', 'mutations']
+    '1'
+    >>> tst.loc['ne8', 'mutations']
+    '8'
+    >>> tst.loc['ne1', 'epitope_name(s)']
+    'ne1,ne3,ne5,ne7'
+    >>> tst.loc['ne2', 'epitope_name(s)']
+    'ne2,ne6'
+    >>> tst.loc['ne4', 'epitope_name(s)']
+    'ne4'
+    >>> tst.loc['ne8', 'epitope_name(s)']
+    'ne8'
+    """
+    # Add new column for identical neoepitopes and for tagging rows to drop
+    stats['epitope_name(s)'] = stats.index
+    stats['collapsed'] = False
+    for epitope1 in stats.index:
+        # Get the IAR to compare against other IARs
+        iar_to_check = stats.loc[epitope1]['IAR_sequence']
+        # Create sets for extending names and mutations
+        joined_names = list()
+        joined_names.append(stats.loc[epitope1, 'epitope_name(s)'])
+        joined_mutations = set(stats.loc[epitope1, 'mutations'].split(','))
+        first = True
+        for epitope2 in stats[epitope1:].index:
+            # First epitope1 == epitope2, skip it
+            if first:
+                first = False
+                continue
+            # If the IAR is the same or is a part of a different IAR while not being the same
+            # neoepitope, it has to be collapsed
+            if (not stats.loc[epitope2, 'collapsed'] and (iar_to_check in
+                    stats.loc[epitope2]['IAR_sequence'] or stats.loc[epitope2][
+                    'IAR_sequence'] in iar_to_check)):
+                # Add the neoepitope name to the extended group
+                joined_names.append(stats.loc[epitope2, 'epitope_name(s)'])
+                # Add the mutation to the extended group
+                joined_mutations.update(stats.loc[epitope2, 'mutations'].split(','))
+                # If one of the IARs was shorter than the other, add it to the set of neoepitopes to
+                # drop
+                if len(iar_to_check) < len(stats.loc[epitope2]['IAR_sequence']):
+                    # Update IAR_sequence to the longer one
+                    stats.loc[epitope1, 'IAR_sequence'] = stats.get_value(epitope2, 'IAR_sequence')
+                stats.loc[epitope2, 'collapsed'] = True
+        # Update the extended group and mutations
+        joined_names = ','.join(sorted(joined_names))
+        stats.loc[epitope1, 'epitope_name(s)'] = joined_names
+        joined_mutations = ','.join(sorted(joined_mutations))
+        stats.loc[epitope1, 'mutations'] = joined_mutations
+    # Drop the tagged neoepitopes
+    stats = stats[stats.collapsed != True]
+    return stats
 
 
 def boost_npa(group, npa):
@@ -648,7 +730,7 @@ def write_results(mhc, all_data=None, boosted_ranks=None):
     :returns: None
     """
     _log.info('Writing output files.')
-    columns = ['HUGO_gene', 'mutations', 'epitope_name', 'IAR_sequence', 'binding_score',
+    columns = ['HUGO_gene', 'mutations', 'epitope_name(s)', 'IAR_sequence', 'binding_score',
                'num_pept', 'num_MHC']
     columns.extend(['overlap'] if mhc == 'mhci' else [])
     columns.extend(['T/N', 'TPM', 'naive_rank', 'boosted_rank', 'binding_MHCs'])
