@@ -175,6 +175,8 @@ def get_mutations(mutations):
     'S>K+X+K>S'
     >>> get_mutations('ENST1231.1_S123K_K126S,ENST1211.1_S143K_K146S')
     'S>K+2X+K>S'
+    >>> get_mutations('ENST1231.1_S123K,ENST1211.1_S143K_K146S')
+    'S>K+2X+K>S'
     >>> get_mutations('ENST1231.1-ENST4564.2_FUSION_Junction:5-Spanning:10')
     'FUSION'
     >>> get_mutations('ENST1231.1_S123K_K125S,ENST1211.1_S143K_K147S')
@@ -203,8 +205,18 @@ def get_mutations(mutations):
             temp_mutation.append(re.sub('[0-9]+', '>', mut))
             prev_pos = curr_pos
         out_muts.append(''.join(temp_mutation))
-    assert len(set(out_muts)) == 1
-    return out_muts[0]
+    # In case of neoepitope collapse, there might be multiple versions of mutations due to
+    # mutations near splicing locations
+    # In such case, we have to check if all mutations are subsets of the longest
+    if len(set(out_muts)) > 1:
+        longest_fusion = max(out_muts, key=len)
+        assert (all(s in longest_fusion for s in out_muts))
+        # If all mutations are subsets, return the longest mutation
+        collapsed_mut = longest_fusion
+    else:
+        collapsed_mut = out_muts[0]
+    return collapsed_mut
+
 
 
 def get_expression(exp_type, rsem_table, transcripts):
