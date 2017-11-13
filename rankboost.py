@@ -308,8 +308,8 @@ def get_normal_comparisons(group_vals, delta=1.5):
     :param float delta: The difference between tumor and wt that is considered as significant
     :return: The number of tum > normal events satisfying the given delta
 
-    >>> df = pandas.DataFrame({'binding_score': [2,3.5,5,10], \
-                               'normal_binding_score': [1,2,3,pandas.np.nan]})
+    >>> df = pandas.DataFrame({'normal_binding_score': [2,3.5,5,10], \
+                               'binding_score': [1,2,3,pandas.np.nan]})
     >>> get_normal_comparisons(df, 1)
     3
     >>> get_normal_comparisons(df)
@@ -323,7 +323,7 @@ def get_normal_comparisons(group_vals, delta=1.5):
     """
     result = 0
     for row in group_vals.itertuples():
-        if row.binding_score - row.normal_binding_score >= delta:
+        if row.normal_binding_score - row.binding_score >= delta:
             result += 1
     return result
 
