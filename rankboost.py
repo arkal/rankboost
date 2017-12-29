@@ -106,6 +106,30 @@ class NoExpressedActionableGenesException(Exception):
         super(NoExpressedActionableGenesException, self).__init__(message)
 
 
+def get_ref_pos_alt_aa(aa_change):
+    """
+    Determine the reference AA(s), the position in the protein, and the alternate AA(s) for a given
+    mutation in the form A123B
+
+    :param aa_change: A String describing a mutation in protein space
+    :return: reference AA(s), position, Alternamte AA(s)
+    :rtype: tuple(str, int, str)
+    """
+    # We expect the mutation to be 3-parts, non-numeric, numeric, non-numeric or NA
+    expected_isdigit = False
+    parts = ['']
+    for char in aa_change:
+        if char.isdigit() is expected_isdigit:
+            parts[-1] += char
+        else:
+            parts.append(char)
+            expected_isdigit = not expected_isdigit
+    parts[1] = int(parts[1])
+    if len(parts) == 2:
+        parts.append('')
+    return parts
+
+
 def get_overlap(df):
     """
     Get the overlap
@@ -150,10 +174,46 @@ def get_overlap(df):
     return overlaps
 
 
+def get_vaf(mutations):
+    """
+    Given the list of mutations in the form
+        <TRANSCRIPT_1>_X123Y#0.56,<TRANSCRIPT_2>_X456Y#0.91,etc  -> for SNVS
+
+        <5'TRANSCRIPT_1>-<3'TRANSCRIPT_1>_FUSION_Junction:X-Spanning:Y,\
+        <5'TRANSCRIPT_2>-<3'TRANSCRIPT_2>_FUSION_Junction:A-Spanning:B,etc  -> for FUSIONS
+
+    return it
+    in the form 0.XX for an SNV or 0.0 for a FUSION
+
+    :param str mutations: The mutations covered by the input IAR
+    :return: The VAF
+    :rtype: float
+
+    >>> get_vaf('ENST1231.1_S123K#0.56')
+    0.56
+    >>> get_vaf('ENST1231.1_S123K#0.56,ENST1211.1_S143K#0.61')
+    0.56
+    >>> get_vaf('ENST1231.1_S123K#0.43_K124S#0.61,ENST1211.1_S143K#0.43_K144S#0.61')
+    0.43
+    >>> get_vaf('ENST1231.1-ENST4564.2_FUSION_Junction:5-Spanning:10')
+    0.0
+    """
+    muts = mutations.split(',')
+    vaf = 1.0
+    for mutation in muts:
+        if 'FUSION' in mutation:
+            return 0.0
+        mutation = mutation.split('_')[1:]
+
+        for mut in mutation:
+            vaf = min(vaf, float(mut.split('#')[1]))
+    return vaf
+
+
 def get_mutations(mutations):
     """
     Given the list of mutations in the form
-        <TRANSCRIPT_1>_X123Y,<TRANSCRIPT_2>_X456Y,etc  -> for SNVS
+        <TRANSCRIPT_1>_X123Y#0.56,<TRANSCRIPT_2>_X456Y#0.91,etc  -> for SNVS
 
         <5'TRANSCRIPT_1>-<3'TRANSCRIPT_1>_FUSION_Junction:X-Spanning:Y,\
         <5'TRANSCRIPT_2>-<3'TRANSCRIPT_2>_FUSION_Junction:A-Spanning:B,etc  -> for FUSIONS
@@ -165,27 +225,26 @@ def get_mutations(mutations):
     :return: The mutations in the reduced form
     :rtype: str
 
-    >>> get_mutations('ENST1231.1_S123K')
+    >>> get_mutations('ENST1231.1_S123K#0.56')
     'S>K'
-    >>> get_mutations('ENST1231.1_S123K,ENST1211.1_S143K')
+    >>> get_mutations('ENST1231.1_S123K#0.56,ENST1211.1_S143K#0.56')
     'S>K'
-    >>> get_mutations('ENST1231.1_S123K_K124S,ENST1211.1_S143K_K144S')
+    >>> get_mutations('ENST1231.1_S123K#0.56_K124S#0.56,ENST1211.1_S143K#0.56_K144S#0.56')
     'S>K+K>S'
-    >>> get_mutations('ENST1231.1_S123K_K125S,ENST1211.1_S143K_K145S')
+    >>> get_mutations('ENST1231.1_S123K#0.56_K125S#0.56,ENST1211.1_S143K#0.56_K145S#0.56')
     'S>K+X+K>S'
-    >>> get_mutations('ENST1231.1_S123K_K126S,ENST1211.1_S143K_K146S')
+    >>> get_mutations('ENST1231.1_S123K#0.56_K126S#0.56,ENST1211.1_S143K#0.56_K146S#0.56')
     'S>K+2X+K>S'
-    >>> get_mutations('ENST1231.1_S123K,ENST1211.1_S143K_K146S')
+    >>> get_mutations('ENST1231.1_S123K#0.56,ENST1211.1_S143K#0.56_K146S#0.56')
     'S>K+2X+K>S'
     >>> get_mutations('ENST1231.1-ENST4564.2_FUSION_Junction:5-Spanning:10')
     'FUSION'
-    >>> get_mutations('ENST1231.1_S123K_K125S,ENST1211.1_S143K_K147S')
+    >>> get_mutations('ENST1231.1_S123K#0.56_K125S#0.56,ENST1211.1_S143K#0.56_K147S#0.56')
     Traceback (most recent call last):
     ...
     AssertionError
 
     """
-    #muts = mutations[mutations.first_valid_index()].split(',')
     muts = mutations.split(',')
     out_muts = []
     for mutation in muts:
@@ -195,14 +254,14 @@ def get_mutations(mutations):
         temp_mutation = []
         prev_pos = 0
         for mut in mutation:
-            curr_pos = int(mut[1:-1])
+            ref, curr_pos, alt = get_ref_pos_alt_aa(mut.split('#')[0])
             if temp_mutation:
                 distance = (curr_pos - prev_pos - 1)
                 append_string = ('' if distance == 0 else
                                  'X+' if distance == 1 else
                                  str(distance) + 'X+')
                 temp_mutation.append('+%s' % append_string)
-            temp_mutation.append(re.sub('[0-9]+', '>', mut))
+            temp_mutation.append(ref + '>' + alt)
             prev_pos = curr_pos
         out_muts.append(''.join(temp_mutation))
     # In case of neoepitope collapse, there might be multiple versions of mutations due to
@@ -216,7 +275,6 @@ def get_mutations(mutations):
     else:
         collapsed_mut = out_muts[0]
     return collapsed_mut
-
 
 
 def get_expression(exp_type, rsem_table, transcripts):
