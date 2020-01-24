@@ -589,35 +589,6 @@ def collapse_iars(stats):
     return stats
 
 
-def boost_npa(group, npa):
-    """
-    Return a fraction of boost based on total number of peptides per IAR.
-
-    :param pandas.core.frame.DataFrame group: The IAR under review.
-    :param float npa: The total boost amount allotted to this criterion.
-    :returns: The percent of boost provided by this criterion.
-    :rtype: float
-
-    >>> df = pandas.DataFrame({'binding_score': [0.1, 0.4, 1.5, 0.04, 0.44, 1.75, 1.0]})
-    >>> boost_npa(df, 1)
-    1.0
-    >>> df = pandas.DataFrame({'binding_score': [0.1, 0.4, 1.5, 1.75, 1.0]})
-    >>> boost_npa(df, 1)
-    0.9
-    >>> df = pandas.DataFrame({'binding_score': [0.1, 0.4, 1.5, 1.75]})
-    >>> boost_npa(df, 1)
-    0.7
-    >>> df = pandas.DataFrame({'binding_score': [0.1, 1.5]})
-    >>> boost_npa(df, 1)
-    0.4
-    >>> df = pandas.DataFrame({'binding_score': [1.5]})
-    >>> boost_npa(df, 1)
-    0.0
-    """
-    n = len(group[group['binding_score'] <= 1.0])
-    return round(npa * ((n >= 1) * 0.4 + (n >= 2) * 0.3 + (n >= 3) * 0.2 + (n >= 4) * 0.1), 2)
-
-
 def boost_nph(group, nph):
     """
     Return a fraction of boost based on total number of high-binding peptides per IAR.
@@ -627,19 +598,48 @@ def boost_nph(group, nph):
     :returns: The percent of boost provided by this criterion.
     :rtype: float
 
+    >>> df = pandas.DataFrame({'binding_score': [0.1, 0.4, 1.5, 0.04, 0.44, 1.75, 1.0]})
+    >>> boost_nph(df, 1)
+    1.0
+    >>> df = pandas.DataFrame({'binding_score': [0.1, 0.4, 1.5, 1.75, 1.0]})
+    >>> boost_nph(df, 1)
+    0.9
+    >>> df = pandas.DataFrame({'binding_score': [0.1, 0.4, 1.5, 1.75]})
+    >>> boost_nph(df, 1)
+    0.7
+    >>> df = pandas.DataFrame({'binding_score': [0.1, 1.5]})
+    >>> boost_nph(df, 1)
+    0.4
+    >>> df = pandas.DataFrame({'binding_score': [1.5]})
+    >>> boost_nph(df, 1)
+    0.0
+    """
+    n = len(group[group['binding_score'] <= 1.0])
+    return round(nph * ((n >= 1) * 0.4 + (n >= 2) * 0.3 + (n >= 3) * 0.2 + (n >= 4) * 0.1), 2)
+
+
+def boost_npa(group, npa):
+    """
+    Return a fraction of boost based on total number of peptides per IAR.
+
+    :param pandas.core.frame.DataFrame group: The IAR under review.
+    :param float npa: The total boost amount allotted to this criterion.
+    :returns: The percent of boost provided by this criterion.
+    :rtype: float
+
     >>> df = pandas.DataFrame({'binding_score': [0.1, 0.4, 1.5, 0.04, 0.44, \
                                                  0.1, 0.4, 1.5, 0.04, 0.44]})
-    >>> boost_nph(df, 1)
+    >>> boost_npa(df, 1)
     0.4
     >>> df = pandas.DataFrame({'binding_score': [0.1, 0.4, 1.5, 0.04, 0.44, \
                                                  0.1, 0.4, 1.5, 0.04, 0.44,  \
                                                  0.1, 0.4, 1.5, 0.04, 0.44, \
                                                  0.1, 0.4, 1.5, 0.04, 0.44]})
-    >>> boost_nph(df, 1)
+    >>> boost_npa(df, 1)
     0.9
     """
     n = len(group)
-    return round(nph * ((n >= 10) * 0.4 + (n >= 15) * 0.3 + (n >= 20) * 0.2 + (n >= 30) * 0.1), 2)
+    return round(npa * ((n >= 10) * 0.4 + (n >= 15) * 0.3 + (n >= 20) * 0.2 + (n >= 30) * 0.1), 2)
 
 
 def boost_nmhc(group, nmhc, med_max_mhc):
